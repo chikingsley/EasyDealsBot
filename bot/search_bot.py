@@ -100,12 +100,44 @@ class DealSearchBot:
                     "No deals found matching your criteria. Try a different search query."
                 )
                 return
+
+            # Log raw deal data for debugging
+            if self.debug:
+                logger.debug(f"Raw deal data: {json.dumps(deals, indent=2)}")
+
+            # Format deals for display
+            formatted_deals = []
+            for i, deal in enumerate(deals, 1):
+                deal_text = (
+                    f"🎯 Deal #{i}\n"
+                    f"Partner: {deal.get('partner', 'N/A')}\n"
+                    f"GEO: {deal.get('geo', 'N/A')}\n"
+                )
+                
+                if deal.get('language'):
+                    deal_text += f"Language: {deal['language']}\n"
+                    
+                if deal.get('traffic_sources'):
+                    deal_text += f"Traffic Sources: {deal['traffic_sources']}\n"
+                    
+                if deal.get('pricing'):
+                    deal_text += f"Pricing:\n{deal['pricing']}\n"
+                    
+                if deal.get('funnels'):
+                    deal_text += f"Funnels: {deal['funnels']}\n"
+                
+                formatted_deals.append(deal_text)
+
+            # Create message with all deals
+            message = "🔍 Here are the deals I found:\n\n"
+            message += "\n\n".join(formatted_deals)
             
-            # Store deals in user session
-            self.user_sessions[chat_id] = UserSession(deals=deals, current_index=0)
-            
-            # Send first deal
-            await self._send_deal(update, context)
+            # Log final formatted message for debugging
+            if self.debug:
+                logger.debug(f"Final formatted message: {message}")
+
+            # Send message with deals
+            await update.message.reply_text(message)
             
         except Exception as e:
             logger.error(f"Error handling message: {str(e)}")

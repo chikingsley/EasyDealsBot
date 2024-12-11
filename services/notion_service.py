@@ -72,38 +72,67 @@ class NotionService:
                 properties = page['properties']
                 
                 # Get partner info
-                partner = self._get_title_value(properties.get('⚡ ALL ADVERTISERS | Kitchen', {}))
+                partner = None
+                if '⚡ ALL ADVERTISERS | Kitchen' in properties:
+                    partner_rel = properties['⚡ ALL ADVERTISERS | Kitchen']
+                    if partner_rel.get('relation') and len(partner_rel['relation']) > 0:
+                        partner = partner_rel['relation'][0]['id']
+                    elif partner_rel.get('formula') and partner_rel['formula'].get('string'):
+                        partner = partner_rel['formula']['string']
                 
-                # Get GEO and language
-                geo_code = self._get_title_value(properties.get('GEO-Funnel Code', {}))
-                language = self._get_select_value(properties.get('Language', {}))
-                geo = f"{geo_code} {language}" if language else geo_code
+                # Get GEO
+                geo = None
+                if 'GEO' in properties:
+                    geo_prop = properties['GEO']
+                    if geo_prop.get('formula') and geo_prop['formula'].get('string'):
+                        geo = geo_prop['formula']['string']
                 
-                # Get traffic sources
-                traffic_sources = self._get_multi_select_values(properties.get('Sources', {}))
+                # Get language
+                languages = []
+                if 'Language' in properties:
+                    lang_prop = properties['Language']
+                    if lang_prop.get('multi_select'):
+                        languages = [item['name'] for item in lang_prop['multi_select']]
                 
                 # Get pricing
-                pricing_model = self._get_select_value(properties.get('Pricing Model', {}))
-                price_value = self._get_number_value(properties.get('Price', {}))
-                price_percent = self._get_number_value(properties.get('Price Percent', {}))
+                cpa_buying = self._get_number_value(properties.get('CPA | Buying', {}))
+                crg_buying = self._get_number_value(properties.get('CRG | Buying', {}))
+                cpl_buying = self._get_number_value(properties.get('CPL | Buying', {}))
                 
-                # Format pricing based on model
-                if pricing_model == 'CPA':
-                    price = f"{price_value}+{price_percent}%" if price_percent else str(price_value)
-                elif pricing_model == 'CPL':
-                    price = f"{price_value} CPL"
-                else:
-                    price = f"{price_value} {pricing_model}" if price_value else pricing_model
+                cpa_selling = self._get_number_value(properties.get('CPA | Network | Selling', {}))
+                crg_selling = self._get_number_value(properties.get('CRG | Network | Selling', {}))
+                cpl_selling = self._get_number_value(properties.get('CPL | Network | Selling', {}))
+                
+                # Format pricing string
+                price_str = []
+                if cpa_buying:
+                    price_str.append(f"CPA: {cpa_buying}$ → {cpa_selling}$")
+                if crg_buying:
+                    price_str.append(f"CRG: {crg_buying}$ → {crg_selling}$")
+                if cpl_buying:
+                    price_str.append(f"CPL: {cpl_buying}$ → {cpl_selling}$")
                 
                 # Get funnels
-                funnels = self._get_relation_titles(properties.get('Funnels', {}))
+                funnels = []
+                if 'Funnels' in properties:
+                    funnel_prop = properties['Funnels']
+                    if funnel_prop.get('multi_select'):
+                        funnels = [item['name'] for item in funnel_prop['multi_select']]
+                
+                # Get traffic sources
+                traffic_sources = []
+                if 'Sources' in properties:
+                    sources_prop = properties['Sources']
+                    if sources_prop.get('multi_select'):
+                        traffic_sources = [item['name'] for item in sources_prop['multi_select']]
                 
                 deal = {
                     'partner': partner,
                     'geo': geo,
-                    'traffic_source': traffic_sources,
-                    'pricing_model': price,
-                    'funnels': funnels
+                    'language': ' | '.join(languages) if languages else None,
+                    'traffic_sources': ' | '.join(traffic_sources) if traffic_sources else None,
+                    'pricing': ' | '.join(price_str) if price_str else None,
+                    'funnels': ' | '.join(funnels) if funnels else None,
                 }
                 deals.append(deal)
 
