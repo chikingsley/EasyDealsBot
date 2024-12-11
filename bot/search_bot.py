@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 class DealSearchBot:
     def __init__(self, debug: bool = False, database_id: str = None):
         # Initialize services
-        self.ai_service = AIService()
         self.notion_service = NotionService(
             notion_token=os.getenv("NOTION_TOKEN"),
             database_id=database_id if database_id else os.getenv("NOTION_DATABASE_ID")
         )
+        self.ai_service = AIService(reference_data=self.notion_service.reference_data)
         
         # Create application
         self.app = Application.builder().token(os.getenv("TELEGRAM_BOT_TOKEN")).build()
@@ -108,25 +108,21 @@ class DealSearchBot:
             # Format deals for display
             formatted_deals = []
             for i, deal in enumerate(deals, 1):
-                deal_text = (
-                    f"🎯 Deal #{i}\n"
-                    f"Partner: {deal.get('partner', 'N/A')}\n"
-                    f"GEO: {deal.get('geo', 'N/A')}\n"
-                )
-                
+                # First line: [number] Partner -> GEO Language [Sources] Pricing
+                main_line = f"[{i}] {deal.get('partner', 'N/A')} -> {deal.get('geo', 'N/A')} "
                 if deal.get('language'):
-                    deal_text += f"Language: {deal['language']}\n"
-                    
+                    main_line += f"{deal['language']} "
                 if deal.get('traffic_sources'):
-                    deal_text += f"Traffic Sources: {deal['traffic_sources']}\n"
-                    
+                    main_line += f"[{deal['traffic_sources']}] "
                 if deal.get('pricing'):
-                    deal_text += f"Pricing:\n{deal['pricing']}\n"
-                    
-                if deal.get('funnels'):
-                    deal_text += f"Funnels: {deal['funnels']}\n"
+                    main_line += deal['pricing']
                 
-                formatted_deals.append(deal_text)
+                # Second line: Funnels (if present)
+                funnel_line = ""
+                if deal.get('funnels'):
+                    funnel_line = f"\nFunnels: {deal['funnels']}"
+                
+                formatted_deals.append(main_line + funnel_line)
 
             # Create message with all deals
             message = "🔍 Here are the deals I found:\n\n"

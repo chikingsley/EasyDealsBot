@@ -1,14 +1,118 @@
 from notion_client import Client
 import logging
 import json
+import os
 from typing import Dict, List, Any, Optional
+from models.reference_data import ReferenceData
 
 logger = logging.getLogger(__name__)
 
 class NotionService:
-    def __init__(self, notion_token: str, database_id: str):
+    def __init__(self, notion_token: str = None, database_id: str = None):
         self.client = Client(auth=notion_token)
         self.database_id = database_id
+        self.advertisers_database_id = os.getenv("ADVERTISERS_DATABASE_ID")
+        self._load_reference_data()
+
+    def _load_reference_data(self):
+        """Load reference data from both Notion databases"""
+        try:
+            # Load partner data from advertisers database
+            advertisers_response = self.client.databases.query(
+                database_id=self.advertisers_database_id
+            )
+
+            # Query offers database
+            offers_response = self.client.databases.query(
+                database_id=self.database_id
+            )
+
+            # Initialize reference data
+            partner_names = set()
+            partner_id_to_name = {}
+            geo_codes = set()
+            traffic_sources = set()
+            funnels = set()
+
+            # Process advertisers data
+            for page in advertisers_response['results']:
+                try:
+                    partner_name = page['properties']['Name']['title'][0]['plain_text']
+                    partner_id = page['id']
+                    partner_names.add(partner_name)
+                    partner_id_to_name[partner_id] = partner_name
+                except (KeyError, IndexError) as e:
+                    logger.warning(f"Error processing advertiser: {str(e)}")
+
+            # Process offers data for GEO codes
+            for page in offers_response['results']:
+                try:
+                    properties = page.get('properties', {})
+                    if 'GEO-Funnel Code' in properties:
+                        geo_funnel_prop = properties['GEO-Funnel Code']
+                        if geo_funnel_prop.get('title') and len(geo_funnel_prop['title']) > 0:
+                            geo_funnel_code = geo_funnel_prop['title'][0].get('plain_text', '')
+                            # Split by hyphen and take first part, then split by space and take first part
+                            if '-' in geo_funnel_code:
+                                geo = geo_funnel_code.split('-')[0].strip()
+                                if ' ' in geo:
+                                    geo = geo.split(' ')[0].strip()
+                                if geo:
+                                    geo_codes.add(geo)
+
+                    # Extract traffic sources
+                    if 'Sources' in properties:
+                        sources_prop = properties['Sources']
+                        if sources_prop.get('multi_select'):
+                            for source in sources_prop['multi_select']:
+                                if source.get('name'):
+                                    traffic_sources.add(source['name'])
+
+                    # Extract funnels
+                    if 'Funnels' in properties:
+                        funnels_prop = properties['Funnels']
+                        if funnels_prop.get('multi_select'):
+                            for funnel in funnels_prop['multi_select']:
+                                if funnel.get('name'):
+                                    funnels.add(funnel['name'])
+
+                except Exception as e:
+                    logger.warning(f"Error processing offer: {str(e)}")
+
+            # Get database schema to extract valid options
+            database = self.client.databases.retrieve(self.database_id)
+            
+            # Extract valid options from database schema
+            properties = database.get('properties', {})
+            
+            # Get Traffic Source options
+            source_prop = properties.get('Source', {})
+            if source_prop.get('type') == 'select':
+                for option in source_prop.get('select', {}).get('options', []):
+                    traffic_sources.add(option['name'])
+
+            # Get Funnel/Vertical options
+            vertical_prop = properties.get('Vertical', {})
+            if vertical_prop.get('type') == 'select':
+                for option in vertical_prop.get('select', {}).get('options', []):
+                    funnels.add(option['name'])
+
+            # Create reference data object
+            self.reference_data = ReferenceData(
+                geo_codes=list(geo_codes),
+                partner_names=list(partner_names),
+                traffic_sources=list(traffic_sources),
+                funnels=list(funnels),
+                partner_id_to_name=partner_id_to_name
+            )
+
+        except Exception as e:
+            logger.error(f"Error loading reference data: {str(e)}")
+            raise
+
+    def _get_company(self, partner_id: str) -> str:
+        """Get partner name from reference data"""
+        return self.reference_data.get_partner_name_by_id(partner_id)
 
     async def search_deals(self, search_params: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Search for deals in Notion database based on parameters."""
@@ -18,9 +122,11 @@ class NotionService:
             # Add geo filter
             if 'geo' in search_params and search_params['geo']:
                 filter_conditions.append({
-                    "property": "GEO-Funnel Code",
-                    "title": {
-                        "contains": search_params['geo'][0].upper()  # Using first geo for now
+                    "property": "GEO",
+                    "formula": {
+                        "string": {
+                            "contains": search_params['geo'][0].upper()  # Using first geo for now
+                        }
                     }
                 })
 
@@ -72,13 +178,16 @@ class NotionService:
                 properties = page['properties']
                 
                 # Get partner info
-                partner = None
                 if '⚡ ALL ADVERTISERS | Kitchen' in properties:
                     partner_rel = properties['⚡ ALL ADVERTISERS | Kitchen']
                     if partner_rel.get('relation') and len(partner_rel['relation']) > 0:
-                        partner = partner_rel['relation'][0]['id']
+                        partner_id = partner_rel['relation'][0]['id']
+                        # Get partner name from ID
+                        partner = self._get_company(partner_id)
                     elif partner_rel.get('formula') and partner_rel['formula'].get('string'):
                         partner = partner_rel['formula']['string']
+                else:
+                    partner = None
                 
                 # Get GEO
                 geo = None
@@ -94,23 +203,26 @@ class NotionService:
                     if lang_prop.get('multi_select'):
                         languages = [item['name'] for item in lang_prop['multi_select']]
                 
-                # Get pricing
-                cpa_buying = self._get_number_value(properties.get('CPA | Buying', {}))
-                crg_buying = self._get_number_value(properties.get('CRG | Buying', {}))
-                cpl_buying = self._get_number_value(properties.get('CPL | Buying', {}))
-                
-                cpa_selling = self._get_number_value(properties.get('CPA | Network | Selling', {}))
-                crg_selling = self._get_number_value(properties.get('CRG | Network | Selling', {}))
-                cpl_selling = self._get_number_value(properties.get('CPL | Network | Selling', {}))
+                # Get pricing information
+                cpa = properties.get('CPA | Buying', {}).get('number')
+                crg = properties.get('CRG | Buying', {}).get('number')
+                cpl = properties.get('CPL buy manual', {}).get('number')
                 
                 # Format pricing string
-                price_str = []
-                if cpa_buying:
-                    price_str.append(f"CPA: {cpa_buying}$ → {cpa_selling}$")
-                if crg_buying:
-                    price_str.append(f"CRG: {crg_buying}$ → {crg_selling}$")
-                if cpl_buying:
-                    price_str.append(f"CPL: {cpl_buying}$ → {cpl_selling}$")
+                pricing_parts = []
+                
+                # Add CPA+CRG if both exist
+                if cpa is not None and crg is not None:
+                    pricing_parts.append(f"${cpa}+{int(crg*100)}%")
+                # Add just CPA if only CPA exists
+                elif cpa is not None:
+                    pricing_parts.append(f"${cpa} CPA")
+                
+                # Add CPL if it exists
+                if cpl is not None:
+                    pricing_parts.append(f"{cpl} CPL")
+                
+                pricing = " | ".join(pricing_parts) if pricing_parts else None
                 
                 # Get funnels
                 funnels = []
@@ -131,7 +243,7 @@ class NotionService:
                     'geo': geo,
                     'language': ' | '.join(languages) if languages else None,
                     'traffic_sources': ' | '.join(traffic_sources) if traffic_sources else None,
-                    'pricing': ' | '.join(price_str) if price_str else None,
+                    'pricing': pricing,
                     'funnels': ' | '.join(funnels) if funnels else None,
                 }
                 deals.append(deal)
