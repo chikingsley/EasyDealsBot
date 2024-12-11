@@ -123,7 +123,7 @@ class DealSearchBot:
             return
             
         session = context.user_data['session']
-        header_text = f"📄 Page {session.get_current_page()} | {session.pricing_mode.title()} Pricing"
+        selected_deal = None
         
         if query.data.startswith("select_"):
             idx = int(query.data.split("_")[1])
@@ -131,9 +131,7 @@ class DealSearchBot:
                 session.selected_deals.remove(idx)
             else:
                 session.selected_deals.add(idx)
-                # Show full deal info in message text
-                deal = session.deals[idx]
-                header_text = f"Selected Deal:\n{session.format_deal_for_display(deal)}\n\n{header_text}"
+                selected_deal = session.deals[idx]
         
         elif query.data == "prev":
             session.prev_page()
@@ -142,32 +140,45 @@ class DealSearchBot:
             session.next_page()
         
         elif query.data.startswith("price_"):
-            mode = query.data.split("_")[1]
-            session.pricing_mode = mode
-            # If a deal is selected, update its display with new pricing
-            if session.selected_deals:
-                selected_idx = max(session.selected_deals)  # Show the last selected deal
-                deal = session.deals[selected_idx]
-                header_text = f"Selected Deal:\n{session.format_deal_for_display(deal)}\n\n{header_text}"
-            else:
-                header_text = f"Switched to {mode.title()} pricing\n{header_text}"
+            # Update pricing mode immediately
+            new_mode = query.data.split("_")[1]
+            session.pricing_mode = new_mode
+            
+            # If a deal is being displayed in the header, get it to update display
+            if "Selected Deal:" in query.message.text:
+                for idx in session.selected_deals:
+                    selected_deal = session.deals[idx]
+                    break
         
         elif query.data == "view":
-            # Format selected deals for copying
-            if session.selected_deals:
+            # If no deals are selected, show all deals
+            deals_to_show = (
+                [session.deals[idx] for idx in sorted(session.selected_deals)]
+                if session.selected_deals
+                else session.deals
+            )
+            
+            if deals_to_show:
                 deals_text = "\n\n".join(
-                    session.format_deal_for_display(session.deals[idx], include_partner=False)
-                    for idx in sorted(session.selected_deals)
+                    session.format_deal_for_display(deal, include_partner=False)
+                    for deal in deals_to_show
                 )
                 await query.message.reply_text(deals_text)
-                header_text = f"Deals displayed above\n{header_text}"
+                header_text = f"{'Selected' if session.selected_deals else 'All'} deals displayed above\n"
             else:
-                header_text = f"No deals selected\n{header_text}"
+                header_text = "No deals to display\n"
         
         elif query.data == "exit":
             await query.message.edit_text("Search completed. Start a new search with /search")
             del context.user_data['session']
             return
+        
+        # Always update header text with current pricing mode
+        header_text = f"{header_text if 'header_text' in locals() else ''}📄 Page {session.get_current_page()} | {session.pricing_mode.title()} Pricing"
+        
+        # Add selected deal to header if present
+        if selected_deal:
+            header_text = f"Selected Deal:\n{session.format_deal_for_display(selected_deal)}\n\n{header_text}"
         
         # Update the message with new keyboard
         keyboard = self._create_keyboard(session)
@@ -204,7 +215,7 @@ class DealSearchBot:
         
         for i in range(start_idx, end_idx):
             deal = session.deals[i]
-            button_text = self._format_deal_button(deal, i, i in session.selected_deals)
+            button_text = session.format_deal_button(deal, i, i in session.selected_deals)
             keyboard.append([InlineKeyboardButton(button_text, callback_data=f"select_{i}")])
         
         # Navigation row
@@ -218,14 +229,21 @@ class DealSearchBot:
         
         # Control buttons row
         control_row = [
-            InlineKeyboardButton("💰 Network", callback_data="price_network"),
-            InlineKeyboardButton("💎 Brand", callback_data="price_brand"),
+            InlineKeyboardButton(
+                f"💰 Network {' ✓' if session.pricing_mode == 'network' else ''}",
+                callback_data="price_network"
+            ),
+            InlineKeyboardButton(
+                f"💎 Brand {' ✓' if session.pricing_mode == 'brand' else ''}",
+                callback_data="price_brand"
+            ),
         ]
         keyboard.append(control_row)
         
         # Action buttons row
+        view_text = "📋 View ALL Deals" if not session.selected_deals else f"📋 View Selected ({len(session.selected_deals)})"
         action_row = [
-            InlineKeyboardButton("📋 View Deals", callback_data="view"),
+            InlineKeyboardButton(view_text, callback_data="view"),
             InlineKeyboardButton("❌ Exit", callback_data="exit")
         ]
         keyboard.append(action_row)

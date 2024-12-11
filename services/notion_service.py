@@ -265,6 +265,10 @@ class NotionService:
                 crg_buying = props.get('CRG | Buying', {}).get('number')
                 cpl_buying = props.get('CPL | Buying', {}).get('number')
                 
+                # Get priority flags
+                internal_priority = props.get('Internal Priority', {}).get('checkbox', False)
+                supplier_priority = props.get('Supplier Priority', {}).get('checkbox', False)
+                
                 # Get funnels
                 funnels = []
                 if 'Funnels' in props:
@@ -296,13 +300,18 @@ class NotionService:
                     # Buying pricing
                     'cpa_buying': cpa_buying,
                     'crg_buying': crg_buying,
-                    'cpl_buying': cpl_buying
+                    'cpl_buying': cpl_buying,
+                    # Priority flags
+                    'internal_priority': internal_priority,
+                    'supplier_priority': supplier_priority
                 })
 
-            # Sort deals by GEO, then by partner
+            # Sort deals by GEO, internal priority, supplier priority, then partner
             deals.sort(key=lambda x: (
-                x['geo'] if x['geo'] else 'ZZZ',  # Sort empty GEOs last
-                x['partner'] if x['partner'] else 'ZZZ'  # Sort empty partners last
+                x.get('geo', ''),
+                not x.get('internal_priority', False),  # True first
+                not x.get('supplier_priority', False),  # True first
+                x.get('partner', '')
             ))
 
             return deals

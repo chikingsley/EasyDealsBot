@@ -148,3 +148,32 @@ class UserSession:
                 result += f"\nFunnels: {funnels}"
         
         return result
+
+    def format_deal_button(self, deal: Dict[str, Any], absolute_idx: int, is_selected: bool) -> str:
+        """Format a deal for button display with priority stars."""
+        emoji = "✅" if is_selected else "⭕️"
+        
+        # Basic info: GEO-Partner-Source
+        partner = deal.get('partner', 'N/A')
+        geo = deal.get('geo', 'N/A')
+        traffic_sources = deal.get('traffic_sources', [])
+        traffic_str = ' | '.join(traffic_sources) if isinstance(traffic_sources, list) else traffic_sources
+        
+        button_text = f"{emoji} {geo}-{partner}-{traffic_str}"
+        
+        # Add priority stars if present
+        stars = ""
+        if deal.get('supplier_priority'):
+            stars += "☆"
+        if deal.get('internal_priority'):
+            stars += "🌟"
+        
+        if stars:
+            button_text += f" {stars}"
+        
+        # Truncate if too long (leaving room for stars)
+        max_length = 45 if stars else 50
+        if len(button_text) > max_length:
+            button_text = button_text[:max_length-3] + "..."
+            
+        return button_text
