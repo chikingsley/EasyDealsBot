@@ -291,6 +291,12 @@ class NotionService:
                 }
                 deals.append(deal)
 
+            # Sort deals by GEO, then by partner
+            deals.sort(key=lambda x: (
+                x['geo'] if x['geo'] else 'ZZZ',  # Sort empty GEOs last
+                x['partner'] if x['partner'] else 'ZZZ'  # Sort empty partners last
+            ))
+
             return deals
 
         except Exception as e:
