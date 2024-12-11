@@ -25,6 +25,9 @@ venv/
 env/
 ENV/
 .env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
 
 # IDE
 .idea/
@@ -32,9 +35,25 @@ ENV/
 *.swp
 *.swo
 .DS_Store
+*.sublime-workspace
+*.sublime-project
 
 # Project specific
 *.log
 .coverage
 htmlcov/
 .pytest_cache/
+.python-version
+*.pyc
+.env.local
+.env.*.local
+
+# Temp files
+*.tmp
+*.bak
+*.swp
+*~
+
+# System Files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,21 @@
+services:
+  bot:
+    build: .
+    environment:
+      # Telegram Bot configuration
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      
+      # Notion API configuration
+      - NOTION_TOKEN=${NOTION_TOKEN}
+      - NOTION_DATABASE_ID=${NOTION_DATABASE_ID}
+      - ADVERTISERS_DATABASE_ID=${ADVERTISERS_DATABASE_ID}
+      
+      # AI Service configuration
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      
+      # Environment setting
+      - ENVIRONMENT=production
+    
+    # Restart policy for production reliability
+    restart: unless-stopped
+    
