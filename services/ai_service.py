@@ -1,9 +1,8 @@
 import os
 import logging
-import mistralai
-from mistralai import Mistral
-from typing import Dict, Any
 import json
+from typing import Dict, Any
+from mistralai import Mistral
 
 logger = logging.getLogger(__name__)
 
@@ -11,40 +10,32 @@ class AIService:
     def __init__(self, message=None):
         self._validate_api_key()
         self.client = Mistral(api_key=os.getenv("MISTRAL_API_KEY"))
-        self.message = message
-        self.progress = None  # Will hold ProgressHandler instance
-        self.max_retries = 3
-        self.base_delay = 1.0
         self.model = "mistral-large-latest"
 
     def _validate_api_key(self):
-        """Validate API key exists"""
-        try:
-            if not os.getenv("MISTRAL_API_KEY"):
-                logger.error("MISTRAL_API_KEY environment variable not set")
-                raise ValueError(
-                    "MISTRAL_API_KEY environment variable not set. "
-                    "Please set it in your .env file."
-                )
-        except Exception as e:
-            logger.error(f"API key validation error: {str(e)}")
-            raise
+        if not os.getenv("MISTRAL_API_KEY"):
+            raise ValueError("MISTRAL_API_KEY environment variable not set")
 
     async def parse_search_query(self, query: str) -> Dict[str, Any]:
         """Parse natural language search query into structured parameters"""
         try:
+            logger.info(" Query to Mistral: " + query)
+            
+            system_message = (
+                "You are a deal search assistant. Extract search parameters from the user's query.\n"
+                "Return a JSON object with these fields:\n"
+                "- geo: list of GEO codes (e.g., ['UK', 'US'])\n"
+                "- traffic_source: list of traffic sources (e.g., ['Facebook', 'Google'])\n"
+                "- pricing_model: pricing model (e.g., 'CPA', 'CPL')\n"
+                "- partner: partner name if specified\n"
+                "If a field is not mentioned in the query, omit it from the JSON."
+            )
+
             messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a deal search assistant. Convert the user's natural language query into structured search parameters. "
-                        "Return only a Python dictionary with these possible keys: 'geo' (list), 'traffic_source' (list), "
-                        "'pricing_model' (str), 'partner' (str). Include only keys that are relevant to the query."
-                    )
-                },
+                {"role": "system", "content": system_message},
                 {"role": "user", "content": query}
             ]
-
+            
             response = await self.client.chat.complete_async(
                 model=self.model,
                 messages=messages,
@@ -52,27 +43,15 @@ class AIService:
                 response_format={"type": "json_object"}
             )
 
-            # Extract the response content and evaluate it as a Python dict
-            response_text = response.choices[0].message.content
-            # Clean up the response to ensure it's a valid Python dict
-            response_text = response_text.strip().replace("```python", "").replace("```", "").strip()
-            
-            # Safely evaluate the string as a Python dict
-            search_params = eval(response_text)
-            
-            # Validate the search parameters
-            valid_keys = {'geo', 'traffic_source', 'pricing_model', 'partner'}
-            search_params = {k: v for k, v in search_params.items() if k in valid_keys}
-            
-            # Convert single values to lists for consistency
-            if 'geo' in search_params and not isinstance(search_params['geo'], list):
-                search_params['geo'] = [search_params['geo']]
-            if 'traffic_source' in search_params and not isinstance(search_params['traffic_source'], list):
-                search_params['traffic_source'] = [search_params['traffic_source']]
-            
-            return search_params
+            content = response.choices[0].message.content
+            logger.info(" Mistral response: " + content)
+
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse Mistral response: {str(e)}")
+                return {}
 
         except Exception as e:
-            logger.error(f"Error parsing search query: {str(e)}")
-            # Return empty dict on error to allow graceful fallback
+            logger.error(f"Error in AI service: {str(e)}")
             return {}

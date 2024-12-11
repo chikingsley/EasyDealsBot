@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
@@ -142,14 +143,32 @@ class DealSearchBot:
             return
             
         deal = session.current_deal()
+        logger.info("\n🔄 Formatting deal for Telegram:")
+        logger.info(json.dumps(deal, indent=2))
+        
+        # Format traffic sources
+        traffic_sources = deal.get('traffic_source', [])
+        traffic_str = '|'.join(traffic_sources) if traffic_sources else 'N/A'
+        
+        # Format partner and GEO
+        partner = deal.get('partner', 'Unknown')
+        geo = deal.get('geo', 'N/A')
+        
+        # Format pricing
+        pricing = deal.get('pricing_model', 'N/A')
+        
+        # Format funnels
+        funnels = deal.get('funnels', [])
+        funnel_str = f"\nFunnels: {', '.join(funnels)}" if funnels else ""
+        
         message = (
-            f"🎯 Deal from {deal.get('partner', 'Unknown')}\n\n"
-            f"📍 GEO: {deal.get('geo', 'N/A')}\n"
-            f"🚦 Traffic: {', '.join(deal.get('traffic_source', []))}\n"
-            f"💰 Pricing: {deal.get('pricing_model', 'N/A')}\n"
-            f"📝 Description: {deal.get('description', 'N/A')}\n\n"
-            f"Deal {session.current_index + 1} of {session.total_deals()}"
+            f"📋 Deal {session.current_index + 1} of {session.total_deals()}\n\n"
+            f"{partner} -> {geo} [{traffic_str}] {pricing}"
+            f"{funnel_str}"
         )
+        
+        logger.info("\n📤 Sending to Telegram:")
+        logger.info(message)
         
         # Create navigation buttons
         keyboard = []
