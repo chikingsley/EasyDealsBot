@@ -119,43 +119,87 @@ class NotionService:
         try:
             filter_conditions = []
             
-            # Add geo filter
-            if 'geo' in search_params and search_params['geo']:
-                filter_conditions.append({
-                    "property": "GEO",
-                    "formula": {
-                        "string": {
-                            "contains": search_params['geo'][0].upper()  # Using first geo for now
+            # Handle GEOs and their languages
+            if 'geos' in search_params and search_params['geos']:
+                geo_conditions = []
+                for geo in search_params['geos']:
+                    # Check if this GEO has a specific language requirement
+                    if ('geo_languages' in search_params and 
+                        search_params['geo_languages'] and 
+                        geo in search_params['geo_languages']):
+                        # Add condition for GEO with specific language
+                        geo_conditions.append({
+                            "and": [
+                                {
+                                    "property": "GEO",
+                                    "formula": {
+                                        "string": {
+                                            "contains": geo
+                                        }
+                                    }
+                                },
+                                {
+                                    "property": "Language",
+                                    "multi_select": {
+                                        "contains": search_params['geo_languages'][geo]
+                                    }
+                                }
+                            ]
+                        })
+                    else:
+                        # Add condition for GEO without language requirement
+                        geo_conditions.append({
+                            "property": "GEO",
+                            "formula": {
+                                "string": {
+                                    "contains": geo
+                                }
+                            }
+                        })
+                
+                # Add all GEO conditions as an OR filter
+                if geo_conditions:
+                    filter_conditions.append({
+                        "or": geo_conditions
+                    })
+
+            # Handle traffic sources
+            if 'traffic_sources' in search_params and search_params['traffic_sources']:
+                source_conditions = []
+                for source in search_params['traffic_sources']:
+                    source_conditions.append({
+                        "property": "Sources",
+                        "multi_select": {
+                            "contains": source
                         }
-                    }
-                })
+                    })
+                if source_conditions:
+                    filter_conditions.append({
+                        "or": source_conditions
+                    })
 
-            # Add traffic source filter
-            if 'traffic_source' in search_params and search_params['traffic_source']:
-                filter_conditions.append({
-                    "property": "Sources",
-                    "multi_select": {
-                        "contains": search_params['traffic_source'][0]  # Using first source
-                    }
-                })
-
-            # Add pricing model filter
-            if 'pricing_model' in search_params and search_params['pricing_model']:
-                filter_conditions.append({
-                    "property": "Pricing Model",
-                    "select": {
-                        "equals": search_params['pricing_model'].upper()
-                    }
-                })
-
-            # Add partner filter
-            if 'partner' in search_params and search_params['partner']:
-                filter_conditions.append({
-                    "property": "⚡ ALL ADVERTISERS | Kitchen",
-                    "relation": {
-                        "contains": search_params['partner']
-                    }
-                })
+            # Handle partners (using relation field)
+            if 'partners' in search_params and search_params['partners']:
+                partner_conditions = []
+                for partner in search_params['partners']:
+                    # Find partner ID from name
+                    partner_id = None
+                    for pid, pname in self.reference_data.partner_id_to_name.items():
+                        if pname == partner:
+                            partner_id = pid
+                            break
+                    
+                    if partner_id:
+                        partner_conditions.append({
+                            "property": "⚡ ALL ADVERTISERS | Kitchen",
+                            "relation": {
+                                "contains": partner_id
+                            }
+                        })
+                if partner_conditions:
+                    filter_conditions.append({
+                        "or": partner_conditions
+                    })
 
             # Construct the final filter
             query = {
@@ -165,12 +209,13 @@ class NotionService:
                 } if filter_conditions else {}
             }
             
-            logger.info(" Notion query: " + json.dumps(query, indent=2))
+            logger.info("Notion query: " + json.dumps(query, indent=2))
 
             # Query the database
             response = self.client.databases.query(**query)
             logger.info(f"Notion response: Found {len(response['results'])} deals")
-            logger.info("First deal properties: " + json.dumps(response['results'][0]['properties'] if response['results'] else {}, indent=2))
+            if response['results']:
+                logger.info("First deal properties: " + json.dumps(response['results'][0]['properties'], indent=2))
 
             # Process and return results
             deals = []
@@ -178,16 +223,14 @@ class NotionService:
                 properties = page['properties']
                 
                 # Get partner info
+                partner = None
                 if '⚡ ALL ADVERTISERS | Kitchen' in properties:
                     partner_rel = properties['⚡ ALL ADVERTISERS | Kitchen']
                     if partner_rel.get('relation') and len(partner_rel['relation']) > 0:
                         partner_id = partner_rel['relation'][0]['id']
-                        # Get partner name from ID
                         partner = self._get_company(partner_id)
                     elif partner_rel.get('formula') and partner_rel['formula'].get('string'):
                         partner = partner_rel['formula']['string']
-                else:
-                    partner = None
                 
                 # Get GEO
                 geo = None
