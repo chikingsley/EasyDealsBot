@@ -163,10 +163,40 @@ class DealSearchBot:
                     session.format_deal_for_display(deal, include_partner=False)
                     for deal in deals_to_show
                 )
-                await query.message.reply_text(deals_text)
+                
+                # Create cute buttons for the deals message with consistent width
+                deals_keyboard = [
+                    [InlineKeyboardButton("✨ Copy All Deals ✨", callback_data=f"copy_deals_{len(deals_text)}")],
+                    [InlineKeyboardButton("🎀 Exit 🎀", callback_data="close_deals")]
+                ]
+                
+                await query.message.reply_text(
+                    text=deals_text,
+                    reply_markup=InlineKeyboardMarkup(deals_keyboard)
+                )
                 header_text = f"{'Selected' if session.selected_deals else 'All'} deals displayed above\n"
+                
+                # Store deals text in context for copy button
+                context.user_data['last_deals_text'] = deals_text
             else:
                 header_text = "No deals to display\n"
+        
+        elif query.data.startswith("copy_deals_"):
+            # Get the deals text and copy to clipboard
+            if 'last_deals_text' in context.user_data:
+                # Run pbcopy command to copy to clipboard
+                import subprocess
+                process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+                process.communicate(context.user_data['last_deals_text'].encode())
+                await query.answer("✨ Deals copied to clipboard! ✨")
+            else:
+                await query.answer("❌ No deals to copy")
+            return
+            
+        elif query.data == "close_deals":
+            # Remove the deals message
+            await query.message.delete()
+            return
         
         elif query.data == "exit":
             await query.message.edit_text("Search completed. Start a new search with /search")
