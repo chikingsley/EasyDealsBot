@@ -220,76 +220,84 @@ class NotionService:
             # Process and return results
             deals = []
             for page in response['results']:
-                properties = page['properties']
+                props = page['properties']
                 
+                # Helper function to safely get property value
+                def get_prop(prop_name: str, prop_type: str = 'title'):
+                    prop = props.get(prop_name, {})
+                    if prop_type == 'title':
+                        return prop.get(prop_type, [{}])[0].get('plain_text', '')
+                    elif prop_type == 'rich_text':
+                        return prop.get(prop_type, [{}])[0].get('plain_text', '') if prop.get(prop_type) else ''
+                    elif prop_type == 'multi_select':
+                        return [item.get('name', '') for item in prop.get(prop_type, [])]
+                    elif prop_type == 'number':
+                        return prop.get(prop_type, 0)
+                    return ''
+
                 # Get partner info
                 partner = None
-                if '⚡ ALL ADVERTISERS | Kitchen' in properties:
-                    partner_rel = properties['⚡ ALL ADVERTISERS | Kitchen']
+                if '⚡ ALL ADVERTISERS | Kitchen' in props:
+                    partner_rel = props['⚡ ALL ADVERTISERS | Kitchen']
                     if partner_rel.get('relation') and len(partner_rel['relation']) > 0:
                         partner_id = partner_rel['relation'][0]['id']
                         partner = self._get_company(partner_id)
-                    elif partner_rel.get('formula') and partner_rel['formula'].get('string'):
-                        partner = partner_rel['formula']['string']
                 
-                # Get GEO
-                geo = None
-                if 'GEO' in properties:
-                    geo_prop = properties['GEO']
-                    if geo_prop.get('formula') and geo_prop['formula'].get('string'):
-                        geo = geo_prop['formula']['string']
-                
-                # Get language
+                # Get GEO and Language
+                geo = props.get('GEO', {}).get('formula', {}).get('string', '')
                 languages = []
-                if 'Language' in properties:
-                    lang_prop = properties['Language']
+                if 'Language' in props:
+                    lang_prop = props['Language']
                     if lang_prop.get('multi_select'):
                         languages = [item['name'] for item in lang_prop['multi_select']]
                 
-                # Get pricing information
-                cpa = properties.get('CPA | Buying', {}).get('number')
-                crg = properties.get('CRG | Buying', {}).get('number')
-                cpl = properties.get('CPL buy manual', {}).get('number')
-                
-                # Format pricing string
-                pricing_parts = []
-                
-                # Add CPA+CRG if both exist
-                if cpa is not None and crg is not None:
-                    pricing_parts.append(f"${cpa}+{int(crg*100)}%")
-                # Add just CPA if only CPA exists
-                elif cpa is not None:
-                    pricing_parts.append(f"${cpa} CPA")
-                
-                # Add CPL if it exists
-                if cpl is not None:
-                    pricing_parts.append(f"{cpl} CPL")
-                
-                pricing = " | ".join(pricing_parts) if pricing_parts else None
+                # Get pricing
+                # Network pricing
+                cpa = props.get('CPA | Network | Selling', {}).get('number')
+                crg = props.get('CRG | Network | Selling', {}).get('number')
+                cpl = props.get('CPL | Network | Selling', {}).get('number')
+                # Brand pricing
+                cpa_brand = props.get('CPA | Brand | Selling', {}).get('number')
+                crg_brand = props.get('CRG | Brand | Selling', {}).get('number')
+                cpl_brand = props.get('CPL | Brand | Selling', {}).get('number')
+                # Buying pricing (for reference)
+                cpa_buying = props.get('CPA | Buying', {}).get('number')
+                crg_buying = props.get('CRG | Buying', {}).get('number')
+                cpl_buying = props.get('CPL | Buying', {}).get('number')
                 
                 # Get funnels
                 funnels = []
-                if 'Funnels' in properties:
-                    funnel_prop = properties['Funnels']
+                if 'Funnels' in props:
+                    funnel_prop = props['Funnels']
                     if funnel_prop.get('multi_select'):
                         funnels = [item['name'] for item in funnel_prop['multi_select']]
                 
                 # Get traffic sources
                 traffic_sources = []
-                if 'Sources' in properties:
-                    sources_prop = properties['Sources']
+                if 'Sources' in props:
+                    sources_prop = props['Sources']
                     if sources_prop.get('multi_select'):
                         traffic_sources = [item['name'] for item in sources_prop['multi_select']]
                 
-                deal = {
+                deals.append({
                     'partner': partner,
                     'geo': geo,
-                    'language': ' | '.join(languages) if languages else None,
-                    'traffic_sources': ' | '.join(traffic_sources) if traffic_sources else None,
-                    'pricing': pricing,
-                    'funnels': ' | '.join(funnels) if funnels else None,
-                }
-                deals.append(deal)
+                    'language': languages[0] if languages else 'Native',
+                    'traffic_sources': traffic_sources,
+                    'funnels': funnels,
+                    # Network pricing
+                    'cpa': cpa,
+                    'crg': crg,
+                    'cpl': cpl,
+                    # Brand pricing
+                    'cpa_brand': cpa_brand,
+                    'crg_brand': crg_brand,
+                    'cpl_brand': cpl_brand,
+                    # Buying pricing
+                    'cpa_buying': cpa_buying,
+                    'crg_buying': crg_buying,
+                    'cpl_buying': cpl_buying
+                })
 
             # Sort deals by GEO, then by partner
             deals.sort(key=lambda x: (
