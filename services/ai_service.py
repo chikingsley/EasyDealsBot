@@ -72,6 +72,26 @@ class AIService:
         self.client = Mistral(api_key=os.getenv("MISTRAL_API_KEY"))
         self.model = "mistral-large-latest"
         self.reference_data = reference_data
+        
+        # Pre-construct the system message with reference data
+        self.system_message = (
+            "You are a deal search assistant specialized in parsing search queries. "
+            "You have access to these valid reference values:\n\n"
+            f"GEO CODES: {', '.join(sorted(self.reference_data.geo_codes)) if self.reference_data else ''}\n"
+            f"TRAFFIC SOURCES: {', '.join(sorted(self.reference_data.traffic_sources)) if self.reference_data else ''}\n"
+            f"PARTNERS: {', '.join(sorted(self.reference_data.partner_names)) if self.reference_data else ''}\n\n"
+            "RULES:\n"
+            "1. Only use the valid GEO codes, traffic sources, and partners listed above\n"
+            "2. Return GEO codes in uppercase 2-letter format\n"
+            "3. If a GEO has no explicit language, use 'Native'\n"
+            "4. GEO with language can be specified as 'CHfr' (Swiss French) or 'CH French'\n"
+            "5. Multiple values can be specified for any field\n\n"
+            "Return a JSON object with these fields (omit if not found in query):\n"
+            "- geos: list of GEO codes\n"
+            "- geo_languages: map of GEO codes to languages\n"
+            "- partners: list of partner names\n"
+            "- traffic_sources: list of traffic sources"
+        )
 
     def _validate_api_key(self):
         if not os.getenv("MISTRAL_API_KEY"):
@@ -292,54 +312,9 @@ class AIService:
         try:
             logger.info(" Query: " + query)
             
-            # Initialize result structure
-            result = {}
-            
-            # Extract GEO codes with languages
-            geo_result = self._extract_geo_with_language(query)
-            if geo_result[0]:
-                result['geos'] = geo_result[0]
-            if geo_result[1]:
-                result['geo_languages'] = geo_result[1]
-            
-            # Extract traffic sources
-            traffic_sources = self._extract_traffic_sources(query)
-            if traffic_sources:
-                result['traffic_sources'] = traffic_sources
-            
-            # Extract partner names (now supports multiple)
-            partners = self._extract_partner_names(query)
-            if partners:
-                result['partners'] = partners
-            
-            # If we found anything through pattern matching, return it
-            if result:
-                logger.info(" Pattern matching result: " + json.dumps(result))
-                return result
-            
-            # If pattern matching didn't find anything, use Mistral
-            logger.info(" Using Mistral for natural language understanding")
-            
-            system_message = (
-                "You are a deal search assistant. Extract search parameters from the user's query.\n"
-                "Return a JSON object with these fields:\n"
-                "- geos: list of GEO codes (e.g., ['UK', 'US', 'IN']). Always use standard 2-letter country codes in uppercase.\n"
-                "- geo_languages: map of GEO codes to languages (e.g., {'CH': 'French', 'DE': 'Native'})\n"
-                "- partners: list of partner names\n"
-                "- traffic_sources: list of traffic sources\n\n"
-                "Valid GEO codes: " + ", ".join(sorted(self.reference_data.geo_codes)) + "\n"
-                "Valid traffic sources: " + ", ".join(sorted(self.reference_data.traffic_sources)) + "\n"
-                "Valid partners: " + ", ".join(sorted(self.reference_data.partner_names)) + "\n\n"
-                "Rules:\n"
-                "1. If a GEO has no explicit language, assume 'Native'\n"
-                "2. Multiple GEOs can be specified (e.g., 'UK, ES, FI')\n"
-                "3. Multiple partners can be specified\n"
-                "4. If a field is not mentioned in the query, omit it from the JSON\n"
-                "5. GEO with language can be specified as 'CHfr' (Swiss French) or 'CH French'\n"
-            )
-
+            # Use Mistral as primary parser
             messages = [
-                {"role": "system", "content": system_message},
+                {"role": "system", "content": self.system_message},
                 {"role": "user", "content": query}
             ]
             
@@ -352,18 +327,71 @@ class AIService:
 
             content = response.choices[0].message.content
             logger.info(" Mistral response: " + content)
-
+            
             try:
-                ai_result = json.loads(content)
-                # Merge AI results with pattern matching results, preferring pattern matching
-                for key, value in ai_result.items():
-                    if key not in result:
-                        result[key] = value
+                result = json.loads(content)
+                
+                # Validate and normalize Mistral's output using pattern matching
+                if 'geos' in result:
+                    validated_geos = [
+                        geo for geo in result['geos'] 
+                        if geo in self.reference_data.geo_codes
+                    ]
+                    if validated_geos:
+                        result['geos'] = validated_geos
+                    else:
+                        del result['geos']
+                
+                if 'traffic_sources' in result:
+                    validated_sources = [
+                        source for source in result['traffic_sources']
+                        if source in self.reference_data.traffic_sources
+                    ]
+                    if validated_sources:
+                        result['traffic_sources'] = validated_sources
+                    else:
+                        del result['traffic_sources']
+                
+                if 'partners' in result:
+                    validated_partners = [
+                        partner for partner in result['partners']
+                        if partner in self.reference_data.partner_names
+                    ]
+                    if validated_partners:
+                        result['partners'] = validated_partners
+                    else:
+                        del result['partners']
+                
+                # If Mistral failed to find anything, fall back to pattern matching
+                if not result:
+                    return self._fallback_pattern_matching(query)
+                
                 return result
+                
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse Mistral response: {str(e)}")
-                return result
+                return self._fallback_pattern_matching(query)
 
         except Exception as e:
             logger.error(f"Error in AI service: {str(e)}")
             return {}
+
+    def _fallback_pattern_matching(self, query: str) -> Dict[str, Any]:
+        """Fallback to pattern matching if Mistral fails"""
+        result = {}
+        
+        geo_result = self._extract_geo_with_language(query)
+        if geo_result[0]:
+            result['geos'] = geo_result[0]
+        if geo_result[1]:
+            result['geo_languages'] = geo_result[1]
+        
+        traffic_sources = self._extract_traffic_sources(query)
+        if traffic_sources:
+            result['traffic_sources'] = traffic_sources
+        
+        partners = self._extract_partner_names(query)
+        if partners:
+            result['partners'] = partners
+            
+        return result

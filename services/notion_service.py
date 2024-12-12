@@ -306,12 +306,12 @@ class NotionService:
                     'supplier_priority': supplier_priority
                 })
 
-            # Sort deals by GEO, internal priority, supplier priority, then partner
+            # Sort deals by priorities first, then GEO and partner
             deals.sort(key=lambda x: (
-                x.get('geo', ''),
-                not x.get('internal_priority', False),  # True first
-                not x.get('supplier_priority', False),  # True first
-                x.get('partner', '')
+                not x.get('internal_priority', False),      # Internal priority first (True values first)
+                not x.get('supplier_priority', False),      # Then supplier priority
+                x.get('geo', ''),                          # Then by GEO
+                x.get('partner', '')                       # Finally by partner name
             ))
 
             return deals
